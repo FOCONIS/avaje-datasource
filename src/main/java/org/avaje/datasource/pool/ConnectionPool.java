@@ -16,6 +16,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
@@ -62,6 +64,11 @@ public class ConnectionPool implements DataSourcePool {
   private final Properties connectionProps;
 
   /**
+   * Queries, that are run for each connection.
+   */
+  private final List<String> customInitQueries;
+
+  /**
    * The jdbc connection url.
    */
   private final String databaseUrl;
@@ -94,6 +101,8 @@ public class ConnectionPool implements DataSourcePool {
   private final boolean autoCommit;
 
   private final boolean readOnly;
+
+  private final boolean failOnStart;
 
   /**
    * Max idle time in millis.
@@ -186,6 +195,7 @@ public class ConnectionPool implements DataSourcePool {
 
     this.autoCommit = params.isAutoCommit();
     this.readOnly = params.isReadOnly();
+    this.failOnStart = params.isFailOnStart();
     this.transactionIsolation = params.getIsolationLevel();
 
     this.maxInactiveMillis = 1000 * params.getMaxInactiveTimeSecs();
@@ -226,6 +236,7 @@ public class ConnectionPool implements DataSourcePool {
         this.connectionProps.setProperty(entry.getKey(), entry.getValue());
       }
     }
+    this.customInitQueries = new ArrayList<>(params.getCustomInitQueries());
 
     try {
       initialise();
@@ -277,12 +288,15 @@ public class ConnectionPool implements DataSourcePool {
     sb.append("] max[").append(maxConnections).append("]");
 
     logger.info(sb.toString());
-    
+
     try {
       queue.ensureMinimumConnections();
     } catch (SQLException e) {
-      logger.error("Error trying to ensure minimum connections", e);
-    }    
+      if (failOnStart) {
+        throw e;
+      }
+      logger.error("Error trying to ensure minimum connections. Maybe db server is down.", e);
+    }
   }
 
   /**
@@ -323,7 +337,7 @@ public class ConnectionPool implements DataSourcePool {
   public boolean isDataSourceUp() {
     return dataSourceUp;
   }
-  // FIXME: both methods should be part of avaje-datasource-api
+
   public SQLException getDataSourceDownReason() {
     return dataSourceDownReason;
   }
@@ -337,8 +351,7 @@ public class ConnectionPool implements DataSourcePool {
       // send an Error to the event log...
       logger.warn(msg);
       if (notify != null) {
-        String subject = "DataSourcePool [" + name + "] warning";
-        notify.dataSourceWarning(subject, msg); // FIXME: When modifying DataSourceAlert interface, pass "name" or "this" instead of subject
+        notify.dataSourceWarning(this, msg); 
       }
     }
   }
@@ -356,7 +369,7 @@ public class ConnectionPool implements DataSourcePool {
       dataSourceDownAlertSent = true;
       logger.error("FATAL: DataSourcePool [" + name + "] is down or has network error!!!", ex);
       if (notify != null) {
-        notify.dataSourceDown(name);
+        notify.dataSourceDown(this, ex);
       }
     }
   }
@@ -369,7 +382,7 @@ public class ConnectionPool implements DataSourcePool {
       dataSourceDownAlertSent = false; 
       logger.error("RESOLVED FATAL: DataSourcePool [" + name + "] is back up!");
       if (notify != null) {
-        notify.dataSourceUp(name);
+        notify.dataSourceUp(this);
       }
 
     } else if (!dataSourceUp) {
@@ -435,6 +448,22 @@ public class ConnectionPool implements DataSourcePool {
   }
 
   /**
+   * Initializes the connection we got from the driver.
+   */
+  private void initConnection( Connection conn) throws SQLException {
+    conn.setAutoCommit(autoCommit);
+    conn.setTransactionIsolation(transactionIsolation);
+    if (readOnly) {
+      conn.setReadOnly(readOnly);
+    }
+    for (String customInitQuery : customInitQueries) {
+      try (Statement stmt = conn.createStatement()) {
+        stmt.execute(customInitQuery);
+      }
+    }
+  }
+  
+  /**
    * Create a Connection that will not be part of the connection pool.
    * <p>
    * <p>
@@ -450,11 +479,7 @@ public class ConnectionPool implements DataSourcePool {
 
     try {
       Connection conn = DriverManager.getConnection(databaseUrl, connectionProps);
-      conn.setAutoCommit(autoCommit);
-      conn.setTransactionIsolation(transactionIsolation);
-      if (readOnly) {
-        conn.setReadOnly(readOnly);
-      }
+      initConnection(conn);
       return conn;
 
     } catch (SQLException ex) {
@@ -753,11 +778,10 @@ public class ConnectionPool implements DataSourcePool {
    */
   public void testAlert() {
 
-    String subject = "Test DataSourcePool [" + name + "]";
     String msg = "Just testing if alert message is sent successfully.";
 
     if (notify != null) {
-      notify.dataSourceWarning(subject, msg);
+      notify.dataSourceWarning(this, msg);
     }
   }
 
@@ -830,7 +854,9 @@ public class ConnectionPool implements DataSourcePool {
     props.putAll(connectionProps);
     props.setProperty("user", username);
     props.setProperty("password", password);
-    return DriverManager.getConnection(databaseUrl, props);
+    Connection conn = DriverManager.getConnection(databaseUrl, props);
+    initConnection(conn);
+    return conn;
   }
 
   /**
