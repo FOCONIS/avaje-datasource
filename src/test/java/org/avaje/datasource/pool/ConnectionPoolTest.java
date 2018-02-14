@@ -73,26 +73,28 @@ public class ConnectionPoolTest {
 
     Connection con1 = pool.getConnection();
     Connection con2 = pool.getConnection();
+    long start = System.nanoTime();
+    while(System.nanoTime() - start < 100_000_000);
 
-    Thread.sleep(100);
     con1.close();
     con2.close();
 
     PoolStatistics statistics = pool.getStatistics(false);
 
     assertThat(statistics.getCount()).isEqualTo(2);
-    assertThat(statistics.getTotalMicros()).isGreaterThan(190000);
-    assertThat(statistics.getHwmMicros()).isGreaterThan(90000);
-    assertThat(statistics.getAvgMicros()).isGreaterThan(90000);
+    assertThat(statistics.getTotalMicros()).isGreaterThan(190000).isLessThan(210000);
+    assertThat(statistics.getHwmMicros()).isGreaterThan(90000).isLessThan(110000);
+    assertThat(statistics.getAvgMicros()).isGreaterThan(90000).isLessThan(110000);
   }
 
   @Test
-  public void getConnection_explicitUserPassword() throws SQLException {
+  public void getConnection_explicitUserPassword() throws SQLException, InterruptedException {
 
     Connection connection = pool.getConnection("sa", "");
     PreparedStatement statement = connection.prepareStatement("create user testing password '123'");
     statement.execute();
     statement.close();
+    connection.commit();
     connection.close();
 
     Connection another = pool.getConnection("testing", "123");

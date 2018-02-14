@@ -17,6 +17,7 @@ import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -236,7 +237,8 @@ public class ConnectionPool implements DataSourcePool {
         this.connectionProps.setProperty(entry.getKey(), entry.getValue());
       }
     }
-    this.customInitQueries = new ArrayList<>(params.getCustomInitQueries());
+    this.customInitQueries = params.getCustomInitQueries() == null ? 
+        Collections.emptyList() : new ArrayList<>(params.getCustomInitQueries());
 
     try {
       initialise();
@@ -450,9 +452,13 @@ public class ConnectionPool implements DataSourcePool {
   /**
    * Initializes the connection we got from the driver.
    */
-  private void initConnection( Connection conn) throws SQLException {
+  private void initConnection(Connection conn) throws SQLException {
     conn.setAutoCommit(autoCommit);
-    conn.setTransactionIsolation(transactionIsolation);
+    // isolation level is set globally for all connections (at least for H2)
+    // and you will need admin rights - so we do not change it, if it already matches.
+    if (conn.getTransactionIsolation() != transactionIsolation) {
+      conn.setTransactionIsolation(transactionIsolation);
+    }
     if (readOnly) {
       conn.setReadOnly(readOnly);
     }
