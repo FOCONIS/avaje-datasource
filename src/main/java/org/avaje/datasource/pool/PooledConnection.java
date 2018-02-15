@@ -14,6 +14,7 @@ import java.sql.Savepoint;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -435,8 +436,9 @@ public class PooledConnection extends ConnectionDelegator {
   /**
    * Reset the connection for returning to the client. Resets the status,
    * startUseTime and hadErrors.
+   * @throws SQLException 
    */
-  void resetForUse() {
+  void resetForUse() throws SQLException {
     this.status = STATUS_ACTIVE;
     this.startUseTime = System.currentTimeMillis();
     this.exeStartNanos = System.nanoTime();

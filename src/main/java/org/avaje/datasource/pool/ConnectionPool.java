@@ -65,10 +65,14 @@ public class ConnectionPool implements DataSourcePool {
   private final Properties connectionProps;
 
   /**
-   * Queries, that are run for each connection.
+   * Queries, that are run for each connection on first open.
    */
-  private final List<String> customInitQueries;
+  private final List<String> initSql;
 
+  /**
+   * Query, that is run on a connection that had an error (e.g. ROLLBACK)
+   */
+  private final List<String> afterErrorSql;
   /**
    * The jdbc connection url.
    */
@@ -237,8 +241,8 @@ public class ConnectionPool implements DataSourcePool {
         this.connectionProps.setProperty(entry.getKey(), entry.getValue());
       }
     }
-    this.customInitQueries = params.getCustomInitQueries() == null ? 
-        Collections.emptyList() : new ArrayList<>(params.getCustomInitQueries());
+    this.initSql = params.getInitSql();
+    this.afterErrorSql = params.getAfterErrorSql();
 
     try {
       initialise();
@@ -462,12 +466,15 @@ public class ConnectionPool implements DataSourcePool {
     if (readOnly) {
       conn.setReadOnly(readOnly);
     }
-    for (String customInitQuery : customInitQueries) {
-      try (Statement stmt = conn.createStatement()) {
-        stmt.execute(customInitQuery);
+    if (initSql != null) {
+      for (String query :initSql) {
+        try (Statement stmt = conn.createStatement()) {
+          stmt.execute(query);
+        }
       }
     }
   }
+
   
   /**
    * Create a Connection that will not be part of the connection pool.
@@ -610,6 +617,15 @@ public class ConnectionPool implements DataSourcePool {
    * the pool.
    */
   boolean validateConnection(PooledConnection conn) {
+    // If connection had any errors, always perform a rollback to close stale transactions
+    // This happens in TestM2MDelete on MariaDb e.g.
+    if (afterErrorSql != null) {
+      for (String sql : afterErrorSql) {
+        try (Statement stmt = conn.createStatement()) {
+            stmt.execute(sql);
+        } catch (SQLException e) { }
+      }
+    }
     try {
       return testConnection(conn);
 
