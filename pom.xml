@@ -9,11 +9,11 @@
   </parent>
 
   <artifactId>avaje-datasource</artifactId>
-  <version>3.2.4-FOC1-SNAPSHOT</version>
+  <version>3.2.4-FOC1</version>
 
   <scm>
     <developerConnection>scm:git:git@github.com:FOCONIS/avaje-datasource.git</developerConnection>
-    <tag>HEAD</tag>
+    <tag>v3.2.4-FOC1</tag>
   </scm>
   
   <dependencies>
