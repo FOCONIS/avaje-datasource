@@ -70,10 +70,6 @@ public class ConnectionPool implements DataSourcePool {
   private final List<String> initSql;
 
   /**
-   * Query, that is run on a connection that had an error (e.g. ROLLBACK)
-   */
-  private final List<String> afterErrorSql;
-  /**
    * The jdbc connection url.
    */
   private final String databaseUrl;
@@ -201,6 +197,7 @@ public class ConnectionPool implements DataSourcePool {
     this.autoCommit = params.isAutoCommit();
     this.readOnly = params.isReadOnly();
     this.failOnStart = params.isFailOnStart();
+    this.initSql = params.getInitSql();
     this.transactionIsolation = params.getIsolationLevel();
 
     this.maxInactiveMillis = 1000 * params.getMaxInactiveTimeSecs();
@@ -241,8 +238,6 @@ public class ConnectionPool implements DataSourcePool {
         this.connectionProps.setProperty(entry.getKey(), entry.getValue());
       }
     }
-    this.initSql = params.getInitSql();
-    this.afterErrorSql = params.getAfterErrorSql();
 
     try {
       initialise();
@@ -459,7 +454,8 @@ public class ConnectionPool implements DataSourcePool {
   private void initConnection(Connection conn) throws SQLException {
     conn.setAutoCommit(autoCommit);
     // isolation level is set globally for all connections (at least for H2)
-    // and you will need admin rights - so we do not change it, if it already matches.
+    // and you will need admin rights - so we do not change it, if it already
+    // matches.
     if (conn.getTransactionIsolation() != transactionIsolation) {
       conn.setTransactionIsolation(transactionIsolation);
     }
@@ -467,7 +463,7 @@ public class ConnectionPool implements DataSourcePool {
       conn.setReadOnly(readOnly);
     }
     if (initSql != null) {
-      for (String query :initSql) {
+      for (String query : initSql) {
         try (Statement stmt = conn.createStatement()) {
           stmt.execute(query);
         }
@@ -475,7 +471,6 @@ public class ConnectionPool implements DataSourcePool {
     }
   }
 
-  
   /**
    * Create a Connection that will not be part of the connection pool.
    * <p>
@@ -617,15 +612,6 @@ public class ConnectionPool implements DataSourcePool {
    * the pool.
    */
   boolean validateConnection(PooledConnection conn) {
-    // If connection had any errors, always perform a rollback to close stale transactions
-    // This happens in TestM2MDelete on MariaDb e.g.
-    if (afterErrorSql != null) {
-      for (String sql : afterErrorSql) {
-        try (Statement stmt = conn.createStatement()) {
-            stmt.execute(sql);
-        } catch (SQLException e) { }
-      }
-    }
     try {
       return testConnection(conn);
 
